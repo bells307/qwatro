@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/bells307/qwatro/port_scanner"
 	"time"
@@ -15,7 +16,10 @@ func main() {
 		NumWorkers(500).
 		Build()
 
-	ch := scanner.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
+
+	ch := scanner.Run(ctx)
 
 	for {
 		r, more := <-ch

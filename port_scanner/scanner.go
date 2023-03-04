@@ -1,6 +1,7 @@
 package port_scanner
 
 import (
+	"context"
 	"sync"
 )
 
@@ -21,57 +22,80 @@ func newScanner(ip IP, portRange PortRange, strategies []scanStrategy, workersNu
 }
 
 // Run запускает сканер и возвращает канал успешно выполненных задач сканирования
-func (s *Scanner) Run() chan *scanTaskSuccess {
+func (s *Scanner) Run(ctx context.Context) chan *scanTaskSuccess {
 	tasksChan := make(chan *scanTask, s.workersNum)
-	go s.taskSpawner(tasksChan)
+	go s.taskSpawner(ctx, tasksChan)
 
 	successesChan := make(chan *scanTaskSuccess)
-	go s.runWorkers(tasksChan, successesChan)
+	go s.runWorkers(ctx, tasksChan, successesChan)
 
 	return successesChan
 }
 
 // taskSpawner генерирует задачи по диапазону портов
-func (s *Scanner) taskSpawner(tasksChan chan *scanTask) {
+func (s *Scanner) taskSpawner(ctx context.Context, tasksChan chan *scanTask) {
+	defer close(tasksChan)
 	for _, p := range s.portRange.ports {
-		port := p
-		tasksChan <- &scanTask{ip: s.ip, port: port}
+		select {
+		case _ = <-ctx.Done():
+			// Контекст отменен, больше создавать задачи не нужно
+			return
+		default:
+			port := p
+			tasksChan <- &scanTask{ip: s.ip, port: port}
+		}
 	}
-	close(tasksChan)
+
 }
 
 // runWorkers занимается запуском горутин, которые будут выполнять задачи сканирования
-func (s *Scanner) runWorkers(tasksChan chan *scanTask, successesChan chan *scanTaskSuccess) {
+func (s *Scanner) runWorkers(ctx context.Context, tasksChan chan *scanTask, successesChan chan *scanTaskSuccess) {
 	wg := sync.WaitGroup{}
 	for i := 0; i < s.workersNum; i++ {
-		go s.spawnWorker(&wg, tasksChan, successesChan)
+		select {
+		case _ = <-ctx.Done():
+			// Контекст отменен, больше запускать воркеров не нужно
+			break
+		default:
+			go s.spawnWorker(ctx, &wg, tasksChan, successesChan)
+		}
 	}
 	wg.Wait()
 	close(successesChan)
 }
 
 // Цикл обработки задач воркером
-func (s *Scanner) spawnWorker(wg *sync.WaitGroup, tasksChan chan *scanTask, successesChan chan *scanTaskSuccess) {
+func (s *Scanner) spawnWorker(ctx context.Context, wg *sync.WaitGroup, tasksChan chan *scanTask, successesChan chan *scanTaskSuccess) {
 	wg.Add(1)
 	defer wg.Done()
 	for {
-		task, more := <-tasksChan
-		if more {
-			s.processWorkerTask(task, successesChan)
-		} else {
-			break
+		select {
+		case _ = <-ctx.Done():
+			// Контекст отменен, больше обрабатывать задачи не нужно
+			return
+		case task, more := <-tasksChan:
+			if more {
+				s.processWorkerTask(ctx, task, successesChan)
+			} else {
+				return
+			}
 		}
 	}
 }
 
 // Обработка конкретной задачи воркером
-func (s *Scanner) processWorkerTask(task *scanTask, successesChan chan *scanTaskSuccess) {
+func (s *Scanner) processWorkerTask(ctx context.Context, task *scanTask, successesChan chan *scanTaskSuccess) {
 	for _, s := range s.strategies {
-		// Здесь происходит последовательное выполнение задач сканирования по указанным стратегиям. В случае, если одна
-		// из стратегий вернула успех, то считаем задачу выполненной
-		if res := s.scan(task); res != nil {
-			successesChan <- res
-			break
+		select {
+		case _ = <-ctx.Done():
+			return
+		default:
+			// Здесь происходит последовательное выполнение задач сканирования по указанным стратегиям. В случае, если одна
+			// из стратегий вернула успех, то считаем задачу выполненной
+			if res := s.scan(task); res != nil {
+				successesChan <- res
+				return
+			}
 		}
 	}
 }
