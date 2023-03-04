@@ -2,78 +2,28 @@ package main
 
 import (
 	"fmt"
-	"math"
-	"net"
-	"sync"
+	"github.com/bells307/qwatro/port_scanner"
 	"time"
 )
 
-type Task struct {
-	ip   string
-	port uint16
-}
-
-const workersNum = 500
-
 func main() {
-	tasks := make(chan Task, workersNum)
-	successes := make(chan Task)
+	scanner := port_scanner.
+		NewScannerBuilder().
+		IP("192.168.65.82").
+		PortRange(port_scanner.OrderedRange(8000, 9000)).
+		Tcp(300 * time.Millisecond).
+		NumWorkers(500).
+		Build()
 
-	go portScanning("localhost", tasks)
+	ch := scanner.Run()
 
-	done := make(chan struct{})
-	go processSuccesses(successes, done)
-
-	wg := sync.WaitGroup{}
-	for i := 0; i < workersNum; i++ {
-		go func() {
-			wg.Add(1)
-			for {
-				task, more := <-tasks
-				if more {
-					scan(task, successes)
-				} else {
-					break
-				}
-			}
-			wg.Done()
-		}()
-	}
-	wg.Wait()
-	close(successes)
-	<-done
-}
-
-func portScanning(host string, tasksChan chan Task) {
-	for i := 1; i <= math.MaxUint16; i++ {
-		port := uint16(i)
-		tasksChan <- Task{
-			ip:   host,
-			port: port,
-		}
-	}
-	close(tasksChan)
-}
-
-func processSuccesses(successes chan Task, done chan struct{}) {
-	count := 0
 	for {
-		s, more := <-successes
+		r, more := <-ch
 		if more {
-			fmt.Printf("%s:%d/tcp\n", s.ip, s.port)
-			count++
+			fmt.Printf("%s:%d\n", r.IP, r.Port)
 		} else {
-			fmt.Printf("available ports: %d", count)
-			done <- struct{}{}
-			return
+			break
 		}
 	}
-}
 
-func scan(task Task, successes chan Task) {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", task.ip, task.port), 300*time.Millisecond)
-	if err == nil {
-		conn.Close()
-		successes <- task
-	}
 }
