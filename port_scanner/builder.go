@@ -6,7 +6,7 @@ import (
 )
 
 // Количество рабочих горутин по умолчанию
-const defaultNumWorkers = 200
+const DefaultNumWorkers = 200
 
 type IP = string
 type Port = uint16
@@ -24,7 +24,7 @@ type ScannerBuilder struct {
 }
 
 func NewScannerBuilder() *ScannerBuilder {
-	return &ScannerBuilder{ip: "127.0.0.1", portRange: nil, numWorkers: defaultNumWorkers}
+	return &ScannerBuilder{ip: "127.0.0.1", portRange: nil, numWorkers: DefaultNumWorkers}
 }
 
 // IP устанавливает ip-адрес сканируемого хоста
@@ -54,7 +54,7 @@ func (b *ScannerBuilder) NumWorkers(numWorkers int) *ScannerBuilder {
 // Build создает сканер портов
 func (b *ScannerBuilder) Build() *Scanner {
 	if b.portRange == nil {
-		pr := OrderedRange(1, math.MaxUint16)
+		pr, _ := OrderedRange(1, math.MaxUint16)
 		b.portRange = &pr
 	}
 	return newScanner(b.ip, *b.portRange, b.strategies, b.numWorkers)
